@@ -1,0 +1,80 @@
+name: learn
+description: |
+  学习助手 - 管理学习资料、智能优先级排序、生成学习计划、追踪进度
+
+  支持功能:
+  - /learn add <url或书名> - 添加学习资料
+  - /learn plan - 生成本周学习计划
+  - /learn status - 查看学习进度
+  - /learn dashboard - 打开可视化面板
+  - /learn sync - 同步到GitHub
+
+version: 1.0.0
+
+commands:
+  - name: learn
+    description: 启动学习助手主菜单
+    handler: main:main
+
+  - name: learn-add
+    description: 添加学习资料 (URL或书名)
+    usage: /learn-add <url或书名> [--domain <领域>]
+    handler: main:add_material
+
+  - name: learn-plan
+    description: 生成本周学习计划
+    handler: main:generate_plan
+
+  - name: learn-status
+    description: 查看当前学习进度和统计
+    handler: main:show_status
+
+  - name: learn-dashboard
+    description: 打开可视化仪表盘
+    handler: main:open_dashboard
+
+  - name: learn-sync
+    description: 同步数据库到GitHub
+    handler: main:sync_to_github
+
+  - name: learn-check
+    description: 检查今日学习任务完成情况
+    handler: main:check_today_tasks
+
+  - name: learn-complete
+    description: 标记任务完成
+    usage: /learn-complete <任务ID> [--rating <1-5>] [--hours <实际用时>]
+    handler: main:complete_task
+
+  - name: learn-recommend
+    description: 查看待审批推荐
+    handler: main:show_recommendations
+
+  - name: learn-approve
+    description: 审批推荐资料
+    usage: /learn-approve <推荐ID>
+    handler: main:approve_recommendation
+
+  - name: learn-clear
+    description: 清除学习计划
+    usage: /learn-clear [--all] 清除本周计划或所有未来计划
+    handler: main:clear_plan
+
+  - name: learn-scan
+    description: 立即扫描推荐资源
+    usage: /learn-scan
+    handler: main:scan_recommendations
+
+  - name: learn-progress
+    description: 更新学习资料进度
+    usage: /learn-progress <资料ID> <进度%> [--hours <已用小时>]
+    handler: main:update_progress
+
+triggers:
+  - type: schedule
+    schedule: "0 21 * * *"  # 每晚21:00检查当日任务完成情况
+    handler: main:check_today_tasks
+
+  - type: schedule
+    schedule: "0 10 * * 6"  # 每周六上午10:00扫描新推荐资源
+    handler: main:scan_recommendations

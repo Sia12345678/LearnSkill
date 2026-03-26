@@ -1,0 +1,496 @@
+"""
+极简文件读写服务
+只做 MD 文件读写 + 计划生成，不做业务逻辑
+"""
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from pathlib import Path
+import sys
+import re
+import sqlite3
+
+app = Flask(__name__)
+CORS(app)
+
+# 配置文件路径
+OBSIDIAN_PATH = Path.home() / "Documents" / "Obsidian Vault" / "学习助手" / "学习资料库.md"
+ACHIEVEMENTS_PATH = Path.home() / "Documents" / "Obsidian Vault" / "学习助手" / "学习成果.md"
+SKILL_PATH = Path(__file__).parent
+
+
+def parse_md_table(content: str) -> list:
+    """解析 MD 表格"""
+    materials = []
+    lines = content.split('\n')
+    in_table = False
+    header_indices = {}
+
+    for line in lines:
+        line = line.strip()
+        if '标题' in line and line.startswith('|'):
+            in_table = True
+            headers = [h.strip() for h in line.split('|')[1:-1]]
+            for i, h in enumerate(headers):
+                header_indices[h] = i
+            continue
+        if in_table and not line.startswith('|'):
+            break
+        if in_table and line.startswith('|') and not line.startswith('|---'):
+            cells = [c.strip() for c in line.split('|')[1:-1]]
+            if len(cells) < 2:
+                continue
+            try:
+                title = cells[header_indices.get('标题', 0)]
+                domain = cells[header_indices.get('领域', 1)]
+                estimated = cells[header_indices.get('预估(h)', 2)]
+                progress = cells[header_indices.get('进度(%)', 3)]
+                actual = cells[header_indices.get('已用(h)', 4)]
+                link = cells[header_indices.get('链接', 5)]
+
+                # 解析链接
+                url = None
+                if link.startswith('['):
+                    url_match = re.search(r'\[.*?\]\((.*?)\)', link)
+                    if url_match:
+                        url = url_match.group(1)
+
+                # 清理标题
+                if title.startswith('《') and title.endswith('》'):
+                    title = title[1:-1]
+
+                materials.append({
+                    'title': title,
+                    'domain': domain if domain else 'work-ai',
+                    'estimated_hours': float(estimated) if estimated and estimated != '' else 2.0,
+                    'progress': int(progress) if progress and progress != '' else 0,
+                    'actual_hours': float(actual) if actual and actual != '' else 0.0,
+                    'url': url
+                })
+            except (ValueError, IndexError):
+                continue
+    return materials
+
+
+def generate_md_table(materials: list) -> str:
+    """生成 MD 表格"""
+    lines = [
+        "# 学习资料库",
+        "",
+        f"> 最后更新: {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}",
+        "",
+        "## 学习资源",
+        "",
+        "| 标题 | 领域 | 预估(h) | 进度(%) | 已用(h) | 链接 |",
+        "|------|------|----------|----------|----------|------|"
+    ]
+
+    for m in materials:
+        title = m.get('title', '')
+        domain = m.get('domain', 'work-ai')
+        estimated = m.get('estimated_hours', 0)
+        progress = m.get('progress', 0)
+        actual = m.get('actual_hours', 0)
+        url = m.get('url', '')
+
+        link = f"[链接]({url})" if url else ""
+
+        lines.append(f"| {title} | {domain} | {estimated} | {progress} | {actual} | {link} |")
+
+    lines.extend([
+        "",
+        "## 说明",
+        "",
+        "- 直接编辑表格即可添加/修改/删除资源",
+        "- 领域可选：work-ai, dsml, quant, philosophy, literature, physics"
+    ])
+
+    return "\n".join(lines)
+
+
+# ========== API 端点 ==========
+
+@app.route('/api/resources', methods=['GET'])
+def get_resources():
+    """获取所有资源"""
+    try:
+        if not OBSIDIAN_PATH.exists():
+            return jsonify({'success': False, 'error': '文件不存在'}), 404
+
+        content = OBSIDIAN_PATH.read_text(encoding='utf-8')
+        materials = parse_md_table(content)
+
+        return jsonify({
+            'success': True,
+            'resources': materials
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/resources/update', methods=['POST'])
+def update_resource():
+    """更新资源（进度、时间）"""
+    try:
+        data = request.json
+        title = data.get('title')
+        progress = data.get('progress')
+        actual_hours = data.get('actual_hours')
+
+        if not title:
+            return jsonify({'success': False, 'error': '标题不能为空'}), 400
+
+        content = OBSIDIAN_PATH.read_text(encoding='utf-8')
+        materials = parse_md_table(content)
+
+        # 查找并更新
+        updated = False
+        for m in materials:
+            if m['title'] == title:
+                if progress is not None:
+                    m['progress'] = progress
+                if actual_hours is not None:
+                    m['actual_hours'] = actual_hours
+                updated = True
+                break
+
+        if not updated:
+            return jsonify({'success': False, 'error': '资源不存在'}), 404
+
+        # 写回文件
+        new_content = generate_md_table(materials)
+        OBSIDIAN_PATH.write_text(new_content, encoding='utf-8')
+
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/resources/delete', methods=['POST'])
+def delete_resource():
+    """移除进程记录（重置进度为0，保留资源）"""
+    try:
+        data = request.json
+        title = data.get('title')
+
+        if not title:
+            return jsonify({'success': False, 'error': '标题不能为空'}), 400
+
+        content = OBSIDIAN_PATH.read_text(encoding='utf-8')
+        materials = parse_md_table(content)
+
+        # 查找并重置进度
+        updated = False
+        for m in materials:
+            if m['title'] == title:
+                m['progress'] = 0
+                m['actual_hours'] = 0.0
+                updated = True
+                break
+
+        if not updated:
+            return jsonify({'success': False, 'error': '资源不存在'}), 404
+
+        # 写回文件
+        new_content = generate_md_table(materials)
+        OBSIDIAN_PATH.write_text(new_content, encoding='utf-8')
+
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/plans', methods=['GET'])
+def get_plans():
+    """获取本周计划"""
+    try:
+        sys.path.insert(0, str(SKILL_PATH))
+        from core.planner import get_plan_summary
+
+        result = get_plan_summary()
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/plans/generate', methods=['POST'])
+def generate_plans():
+    """生成学习计划"""
+    try:
+        sys.path.insert(0, str(SKILL_PATH))
+        from core.planner import generate_weekly_plan
+
+        plans = generate_weekly_plan(clear_existing=True)
+        return jsonify({'success': True, 'plans': plans})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/plans/clear', methods=['POST'])
+def clear_plans():
+    """清除本周计划"""
+    try:
+        sys.path.insert(0, str(SKILL_PATH))
+        from core.planner import clear_weekly_plan
+
+        count = clear_weekly_plan()
+        return jsonify({'success': True, 'count': count})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/plans/complete', methods=['POST'])
+def complete_plan():
+    """完成计划任务"""
+    try:
+        data = request.json
+        plan_id = data.get('plan_id')
+        actual_start_time = data.get('actual_start_time')  # "21:00"
+        actual_end_time = data.get('actual_end_time')      # "22:30"
+
+        if not plan_id or not actual_start_time or not actual_end_time:
+            return jsonify({'success': False, 'error': '缺少必要参数'}), 400
+
+        # 计算用时
+        start_h, start_m = map(int, actual_start_time.split(':'))
+        end_h, end_m = map(int, actual_end_time.split(':'))
+        actual_hours = (end_h * 60 + end_m - start_h * 60 - start_m) / 60
+
+        if actual_hours <= 0:
+            return jsonify({'success': False, 'error': '结束时间必须晚于起始时间'}), 400
+
+        # 从数据库获取计划详情
+        sys.path.insert(0, str(SKILL_PATH))
+        from core.db import get_connection
+
+        with get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            plan = conn.execute('''
+                SELECT id, material_title, material_domain, material_url,
+                       planned_hours, scheduled_date, time_slot
+                FROM plans WHERE id = ?
+            ''', (plan_id,)).fetchone()
+
+            if not plan:
+                return jsonify({'success': False, 'error': '计划不存在'}), 404
+
+            plan = dict(plan)
+
+        # 更新计划状态
+        with get_connection() as conn:
+            conn.execute('''
+                UPDATE plans
+                SET status = 'completed',
+                    actual_start_time = ?,
+                    actual_end_time = ?,
+                    actual_hours = ?
+                WHERE id = ?
+            ''', (actual_start_time, actual_end_time, actual_hours, plan_id))
+
+        # 更新 Apple Calendar
+        try:
+            from core.calendar_sync import _update_event
+            _update_event(
+                plan_id=plan_id,
+                scheduled_date=plan['scheduled_date'],
+                new_start_time=actual_start_time,
+                new_end_time=actual_end_time,
+                plan_info=plan
+            )
+        except Exception as e:
+            print(f"Calendar 更新失败: {e}")
+
+        return jsonify({
+            'success': True,
+            'actual_hours': round(actual_hours, 1)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/achievements', methods=['GET'])
+def get_achievements():
+    """获取成果数据（统计 + 两个MD的内容）"""
+    try:
+        # 读取已完成资源
+        if OBSIDIAN_PATH.exists():
+            content = OBSIDIAN_PATH.read_text(encoding='utf-8')
+            materials = parse_md_table(content)
+        else:
+            materials = []
+
+        # 读取成果记录
+        completed_records = []
+        if ACHIEVEMENTS_PATH.exists():
+            ach_content = ACHIEVEMENTS_PATH.read_text(encoding='utf-8')
+            completed_records = _parse_achievements_md(ach_content)
+
+        # 统计
+        total = len(materials)
+        completed = [m for m in materials if m['progress'] >= 100]
+        in_progress = [m for m in materials if 0 < m['progress'] < 100]
+        pending = [m for m in materials if m['progress'] == 0]
+
+        # 累计学习时长（从数据库读已完成计划的 actual_hours）
+        from core.db import get_connection
+        total_hours = 0.0
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT SUM(actual_hours) FROM plans WHERE status='completed' AND actual_hours IS NOT NULL"
+            ).fetchone()
+            total_hours = row[0] or 0.0
+
+        # 领域分布
+        domain_count = {}
+        for m in completed:
+            d = m.get('domain', 'other')
+            domain_count[d] = domain_count.get(d, 0) + 1
+
+        return jsonify({
+            'success': True,
+            'stats': {
+                'total': total,
+                'completed': len(completed),
+                'in_progress': len(in_progress),
+                'pending': len(pending),
+                'total_hours': round(total_hours, 1),
+            },
+            'domain_count': domain_count,
+            'completed_materials': completed,
+            'in_progress_materials': in_progress,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/achievements/save', methods=['POST'])
+def save_achievement():
+    """保存完成项到学习成果.md"""
+    try:
+        data = request.json
+        title = data.get('title')
+        domain = data.get('domain', 'other')
+        actual_hours = data.get('actual_hours', 0)
+        rating = data.get('rating', '⭐')
+        note = data.get('note', '')
+
+        if not title:
+            return jsonify({'success': False, 'error': '标题不能为空'}), 400
+
+        from datetime import date
+        today = date.today().strftime('%Y-%m-%d')
+
+        # 读取现有成果
+        records = []
+        if ACHIEVEMENTS_PATH.exists():
+            ach_content = ACHIEVEMENTS_PATH.read_text(encoding='utf-8')
+            records = _parse_achievements_md(ach_content)
+
+        # 检查是否已存在
+        for r in records:
+            if r['title'] == title:
+                return jsonify({'success': False, 'error': '该成果已存在'}), 409
+
+        # 添加新记录
+        records.append({
+            'title': title,
+            'domain': domain,
+            'completed_date': today,
+            'actual_hours': actual_hours,
+            'rating': rating,
+            'note': note,
+        })
+
+        # 写回文件
+        _write_achievements_md(records)
+
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _parse_achievements_md(content: str) -> list:
+    """解析学习成果.md"""
+    records = []
+    lines = content.split('\n')
+    in_table = False
+    header_indices = {}
+
+    for line in lines:
+        line = line.strip()
+        if '标题' in line and line.startswith('|'):
+            in_table = True
+            headers = [h.strip() for h in line.split('|')[1:-1]]
+            for i, h in enumerate(headers):
+                header_indices[h] = i
+            continue
+        if in_table and not line.startswith('|'):
+            break
+        if in_table and line.startswith('|') and not line.startswith('|---'):
+            cells = [c.strip() for c in line.split('|')[1:-1]]
+            if len(cells) < 2 or not cells[0]:
+                continue
+            records.append({
+                'title': cells[header_indices.get('标题', 0)],
+                'domain': cells[header_indices.get('领域', 1)] if len(cells) > 1 else '',
+                'completed_date': cells[header_indices.get('完成日期', 2)] if len(cells) > 2 else '',
+                'actual_hours': float(cells[header_indices.get('实际用时(h)', 3)]) if len(cells) > 3 and cells[header_indices.get('实际用时(h)', 3)] else 0,
+                'rating': cells[header_indices.get('评分', 4)] if len(cells) > 4 else '',
+                'note': cells[header_indices.get('备注', 5)] if len(cells) > 5 else '',
+            })
+    return records
+
+
+def _write_achievements_md(records: list):
+    """写入学习成果.md"""
+    import datetime
+    total_hours = sum(r.get('actual_hours', 0) for r in records)
+
+    lines = [
+        "# 学习成果",
+        "",
+        "> 记录每一份学习的收获与完成",
+        "",
+        "## 已完成项目",
+        "",
+        "| 标题 | 领域 | 完成日期 | 实际用时(h) | 评分 | 备注 |",
+        "|------|------|----------|-------------|------|------|",
+    ]
+
+    for r in records:
+        lines.append(f"| {r['title']} | {r['domain']} | {r['completed_date']} | {r['actual_hours']} | {r['rating']} | {r['note']} |")
+
+    lines.extend([
+        "",
+        "## 统计",
+        "",
+        f"- 总完成数: {len(records)}",
+        f"- 累计学习时长: {total_hours}h",
+        f"- 更新时间: {datetime.datetime.now().strftime('%Y-%m-%d')}",
+        "",
+        "## 说明",
+        "",
+        "- 直接编辑上方表格添加已完成项目",
+        "- 评分: ⭐ 到 ⭐⭐⭐⭐⭐",
+        "- 实际用时可从数据库自动填充",
+    ])
+
+    ACHIEVEMENTS_PATH.write_text("\n".join(lines), encoding='utf-8')
+
+
+if __name__ == '__main__':
+    print("📚 学习助手 - 极简文件服务")
+    print(f"📂 Obsidian 路径: {OBSIDIAN_PATH}")
+    print(f"📊 成果文件: {ACHIEVEMENTS_PATH}")
+    print(f"🌐 http://localhost:5001")
+    print("\n可用端点:")
+    print("  GET  /api/resources           - 获取所有资源")
+    print("  POST /api/resources/update    - 更新资源")
+    print("  POST /api/resources/delete    - 删除资源")
+    print("  GET  /api/plans              - 获取本周计划")
+    print("  POST /api/plans/generate     - 生成计划")
+    print("  POST /api/plans/clear        - 清除计划")
+    print("  GET  /api/achievements       - 获取成果数据")
+    print("  POST /api/achievements/save  - 保存成果")
+    print()
+
+    app.run(host='0.0.0.0', port=5001, debug=True)
