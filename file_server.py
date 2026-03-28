@@ -47,6 +47,7 @@ def parse_md_table(content: str) -> list:
                 progress = cells[header_indices.get('进度(%)', 3)]
                 actual = cells[header_indices.get('已用(h)', 4)]
                 link = cells[header_indices.get('链接', 5)]
+                status = cells[header_indices.get('状态', 6)] if 6 < len(cells) else ''
 
                 # 解析链接
                 url = None
@@ -65,7 +66,8 @@ def parse_md_table(content: str) -> list:
                     'estimated_hours': float(estimated) if estimated and estimated != '' else 2.0,
                     'progress': int(progress) if progress and progress != '' else 0,
                     'actual_hours': float(actual) if actual and actual != '' else 0.0,
-                    'url': url
+                    'url': url,
+                    'status': status
                 })
             except (ValueError, IndexError):
                 continue
@@ -81,8 +83,8 @@ def generate_md_table(materials: list) -> str:
         "",
         "## 学习资源",
         "",
-        "| 标题 | 领域 | 预估(h) | 进度(%) | 已用(h) | 链接 |",
-        "|------|------|----------|----------|----------|------|"
+        "| 标题 | 领域 | 预估(h) | 进度(%) | 已用(h) | 链接 | 状态 |",
+        "|------|------|----------|----------|----------|------|------|"
     ]
 
     for m in materials:
@@ -92,10 +94,11 @@ def generate_md_table(materials: list) -> str:
         progress = m.get('progress', 0)
         actual = m.get('actual_hours', 0)
         url = m.get('url', '')
+        status = m.get('status', '')
 
         link = f"[链接]({url})" if url else ""
 
-        lines.append(f"| {title} | {domain} | {estimated} | {progress} | {actual} | {link} |")
+        lines.append(f"| {title} | {domain} | {estimated} | {progress} | {actual} | {link} | {status} |")
 
     lines.extend([
         "",
@@ -149,6 +152,8 @@ def update_resource():
             if m['title'] == title:
                 if progress is not None:
                     m['progress'] = progress
+                    # 进度100%时自动标记done
+                    m['status'] = 'done' if progress >= 100 else ''
                 if actual_hours is not None:
                     m['actual_hours'] = actual_hours
                 updated = True
@@ -194,7 +199,8 @@ def add_resource():
             'estimated_hours': estimated_hours,
             'progress': 0,
             'actual_hours': 0.0,
-            'url': url
+            'url': url,
+            'status': ''
         })
 
         # 写回文件
