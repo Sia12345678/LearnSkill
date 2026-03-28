@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import re
 import sqlite3
+from datetime import date, timedelta
 
 app = Flask(__name__)
 CORS(app)
@@ -165,9 +166,49 @@ def update_resource():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/resources/add', methods=['POST'])
+def add_resource():
+    """新增学习资源"""
+    try:
+        data = request.json
+        title = data.get('title')
+        domain = data.get('domain', 'work-ai')
+        url = data.get('url', '')
+        estimated_hours = float(data.get('estimated_hours', 0)) or 1.0
+
+        if not title:
+            return jsonify({'success': False, 'error': '标题不能为空'}), 400
+
+        content = OBSIDIAN_PATH.read_text(encoding='utf-8')
+        materials = parse_md_table(content)
+
+        # 检查是否已存在
+        for m in materials:
+            if m['title'] == title:
+                return jsonify({'success': False, 'error': '该资源已存在'}), 409
+
+        # 添加新资源
+        materials.append({
+            'title': title,
+            'domain': domain,
+            'estimated_hours': estimated_hours,
+            'progress': 0,
+            'actual_hours': 0.0,
+            'url': url
+        })
+
+        # 写回文件
+        new_content = generate_md_table(materials)
+        OBSIDIAN_PATH.write_text(new_content, encoding='utf-8')
+
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/resources/delete', methods=['POST'])
 def delete_resource():
-    """移除进程记录（重置进度为0，保留资源）"""
+    """从 Obsidian MD 中删除资源"""
     try:
         data = request.json
         title = data.get('title')
@@ -178,16 +219,11 @@ def delete_resource():
         content = OBSIDIAN_PATH.read_text(encoding='utf-8')
         materials = parse_md_table(content)
 
-        # 查找并重置进度
-        updated = False
-        for m in materials:
-            if m['title'] == title:
-                m['progress'] = 0
-                m['actual_hours'] = 0.0
-                updated = True
-                break
+        # 过滤掉目标资源
+        original_count = len(materials)
+        materials = [m for m in materials if m['title'] != title]
 
-        if not updated:
+        if len(materials) == original_count:
             return jsonify({'success': False, 'error': '资源不存在'}), 404
 
         # 写回文件
@@ -234,6 +270,122 @@ def clear_plans():
 
         count = clear_weekly_plan()
         return jsonify({'success': True, 'count': count})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/plans/delete', methods=['POST'])
+def delete_plan():
+    """删除单个计划"""
+    try:
+        data = request.json
+        plan_id = data.get('plan_id')
+
+        if not plan_id:
+            return jsonify({'success': False, 'error': '缺少 plan_id'}), 400
+
+        from core.db import get_connection
+        from core.calendar_sync import _delete_event_by_plan_id
+
+        # 获取计划日期（用于从 Calendar 删除）
+        with get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            plan = conn.execute(
+                'SELECT id, scheduled_date FROM plans WHERE id = ?', (plan_id,)
+            ).fetchone()
+
+            if not plan:
+                return jsonify({'success': False, 'error': '计划不存在'}), 404
+
+        # 从数据库删除
+        with get_connection() as conn:
+            conn.execute('DELETE FROM plans WHERE id = ?', (plan_id,))
+
+        # 从 Calendar 删除事件
+        try:
+            _delete_event_by_plan_id(plan_id)
+        except Exception as e:
+            print(f"Calendar 删除失败: {e}")
+
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/plans/modify', methods=['POST'])
+def modify_plan():
+    """修改计划内容或时间"""
+    try:
+        data = request.json
+        plan_id = data.get('plan_id')
+        new_material_title = data.get('material_title')
+        new_material_domain = data.get('material_domain')
+        new_material_url = data.get('material_url')
+        new_scheduled_date = data.get('scheduled_date')  # "YYYY-MM-DD"
+        new_time_slot = data.get('time_slot')  # "HH:MM-HH:MM"
+
+        if not plan_id:
+            return jsonify({'success': False, 'error': '缺少 plan_id'}), 400
+
+        from core.db import get_connection
+        from core.calendar_sync import _delete_event_by_plan_id, _create_event
+
+        # 获取现有计划
+        with get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            plan = conn.execute(
+                'SELECT * FROM plans WHERE id = ?', (plan_id,)
+            ).fetchone()
+            if not plan:
+                return jsonify({'success': False, 'error': '计划不存在'}), 404
+            plan = dict(plan)
+
+        # 更新数据库
+        sched_date = date.fromisoformat(new_scheduled_date)
+        week_start = sched_date - timedelta(days=sched_date.weekday())
+
+        with get_connection() as conn:
+            conn.execute('''
+                UPDATE plans SET
+                    material_title = ?,
+                    material_domain = ?,
+                    material_url = ?,
+                    scheduled_date = ?,
+                    time_slot = ?,
+                    week_start = ?
+                WHERE id = ?
+            ''', (
+                new_material_title or plan['material_title'],
+                new_material_domain or plan['material_domain'],
+                new_material_url or plan['material_url'],
+                new_scheduled_date,
+                new_time_slot or plan['time_slot'],
+                str(week_start),
+                plan_id
+            ))
+
+        # 从 Calendar 删除旧事件
+        try:
+            _delete_event_by_plan_id(plan_id)
+        except Exception as e:
+            print(f"Calendar 删除旧事件失败: {e}")
+
+        # 创建新事件
+        try:
+            updated_plan = {
+                'id': plan_id,
+                'title': new_material_title or plan['material_title'],
+                'domain': new_material_domain or plan['material_domain'],
+                'url': new_material_url or plan['material_url'],
+                'planned_hours': plan['planned_hours'],
+                'scheduled_date': sched_date,
+                'time_slot': new_time_slot or plan['time_slot'],
+            }
+            _create_event(updated_plan)
+        except Exception as e:
+            print(f"Calendar 创建新事件失败: {e}")
+
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -289,12 +441,22 @@ def complete_plan():
         # 更新 Apple Calendar
         try:
             from core.calendar_sync import _update_event
+            # 构建 _create_event 期望的 plan_info 格式
+            plan_info = {
+                'id': plan_id,
+                'title': plan['material_title'],
+                'domain': plan['material_domain'],
+                'url': plan['material_url'],
+                'planned_hours': plan['planned_hours'],
+                'scheduled_date': plan['scheduled_date'],
+                'time_slot': plan['time_slot'],
+            }
             _update_event(
                 plan_id=plan_id,
                 scheduled_date=plan['scheduled_date'],
                 new_start_time=actual_start_time,
                 new_end_time=actual_end_time,
-                plan_info=plan
+                plan_info=plan_info
             )
         except Exception as e:
             print(f"Calendar 更新失败: {e}")

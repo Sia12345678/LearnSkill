@@ -75,11 +75,18 @@ def sync_week_to_calendar(week_start: date):
     return True
 
 
-def _create_event(plan: Dict) -> bool:
-    """创建单个日历事件"""
+def _create_event(plan: Dict, override_start_time: str = None, override_end_time: str = None) -> bool:
+    """创建单个日历事件
+    Args:
+        plan: 计划字典，必须包含 scheduled_date, time_slot, title, domain, planned_hours, id
+        override_start_time: 可选，覆盖起始时间（格式 HH:MM）
+        override_end_time: 可选，覆盖结束时间（格式 HH:MM）
+    """
     scheduled_date = plan['scheduled_date']
     if isinstance(scheduled_date, str):
         scheduled_date = date.fromisoformat(scheduled_date)
+    elif not isinstance(scheduled_date, date):
+        scheduled_date = date.today()
 
     # 解析时间段
     time_slot = plan['time_slot']  # "09:00-12:00"
@@ -91,11 +98,14 @@ def _create_event(plan: Dict) -> bool:
 
     description = f"学习资料: {plan['title']}; 领域: {domain_name}; 预估: {plan['planned_hours']}h; ID: {plan['id']}"
 
-    print(f"    创建事件: {title} @ {scheduled_date} {time_slot}")
+    # 使用覆盖时间（完成计划时）或默认时间段
+    actual_start = override_start_time or start_time_str
+    actual_end = override_end_time or end_time_str
+    print(f"    创建事件: {title} @ {scheduled_date} {actual_start}-{actual_end}")
 
     # 解析时间
-    start_h, start_m = start_time_str.split(':')
-    end_h, end_m = end_time_str.split(':')
+    start_h, start_m = actual_start.split(':')
+    end_h, end_m = actual_end.split(':')
 
     # 构建AppleScript - 使用format避免花括号冲突
     script_template = '''tell application "Calendar"
@@ -139,23 +149,19 @@ end tell'''
     return success
 
 
-def _update_event(plan_id: int, scheduled_date: date, new_start_time: str, new_end_time: str, plan_info: Dict = None) -> bool:
-    """更新日历事件的时间"""
+def _delete_event_by_plan_id(plan_id: int) -> bool:
+    """根据计划ID删除日历事件"""
     if not ensure_calendar_exists():
         return False
 
-    # 解析新时间
-    start_h, start_m = new_start_time.split(':')
-    end_h, end_m = new_end_time.split(':')
-
-    # 先查找并删除旧事件
-    script_find = '''tell application "Calendar"
-    set calName to "{cal_name}"
+    script = f'''tell application "Calendar"
+    set calName to "{CALENDAR_NAME}"
     try
         set myCal to first calendar whose name is calName
+        set evtList to every event of myCal
         set targetUID to ""
-
-        repeat with evt in events of myCal
+        repeat with i from 1 to (count of evtList)
+            set evt to item i of evtList
             set evtDesc to description of evt
             if evtDesc contains "ID: {plan_id}" then
                 set targetUID to uid of evt
@@ -163,29 +169,34 @@ def _update_event(plan_id: int, scheduled_date: date, new_start_time: str, new_e
                 exit repeat
             end if
         end repeat
-
         if targetUID is "" then
             return "NotFound"
         else
-            return "Deleted:" & targetUID
+            return "Deleted"
         end if
     on error errMsg
         return "Error:" & errMsg
     end try
 end tell'''
 
-    result = _run_applescript(script_find.format(cal_name=CALENDAR_NAME, plan_id=plan_id))
+    result = _run_applescript(script)
+    return result.startswith("Deleted")
 
-    if not result.startswith("Deleted:"):
-        print(f"    [更新失败] 未找到事件: {result}")
+
+def _update_event(plan_id: int, scheduled_date: date, new_start_time: str, new_end_time: str, plan_info: Dict = None) -> bool:
+    """更新日历事件的时间"""
+    if not ensure_calendar_exists():
         return False
 
-    # 如果提供了计划信息，创建新事件
+    # 先查找并删除旧事件
+    deleted = _delete_event_by_plan_id(plan_id)
+    if not deleted:
+        print(f"    [更新失败] 未找到事件 ID:{plan_id}")
+        return False
+
+    # 如果提供了计划信息，创建新事件（使用真实时间）
     if plan_info:
-        new_plan = plan_info.copy()
-        new_plan['time_slot'] = f"{new_start_time}-{new_end_time}"
-        new_plan['scheduled_date'] = scheduled_date
-        return _create_event(new_plan)
+        return _create_event(plan_info, override_start_time=new_start_time, override_end_time=new_end_time)
 
     return True
 
@@ -215,7 +226,9 @@ def _clear_week_events(week_start: date):
         set time of endRange to 0
 
         -- 收集要删除的事件ID
-        repeat with evt in events of myCal
+        set evtList to every event of myCal
+        repeat with i from 1 to (count of evtList)
+            set evt to item i of evtList
             set evtStart to start date of evt
             if evtStart >= startRange and evtStart < endRange then
                 if summary of evt starts with "[学习]" then
@@ -267,7 +280,9 @@ def _clear_future_events(from_date: date):
         set month of startRange to {month}
         set day of startRange to {day}
 
-        repeat with evt in events of myCal
+        set evtList to every event of myCal
+        repeat with i from 1 to (count of evtList)
+            set evt to item i of evtList
             if start date of evt >= startRange then
                 set end of eventsToDelete to evt
             end if
@@ -337,7 +352,9 @@ def _get_today_events() -> List[Dict]:
             set startRange to date "{today.strftime('%Y-%m-%d')}"
             set endRange to date "{tomorrow.strftime('%Y-%m-%d')}"
 
-            repeat with evt in events of myCal
+            set evtList to every event of myCal
+            repeat with i from 1 to (count of evtList)
+                set evt to item i of evtList
                 if start date of evt >= startRange and start date of evt < endRange then
                     set eventInfo to "TITLE:" & (summary of evt) & "|START:" & (start date of evt) & "|DESC:" & (description of evt)
                     set end of eventList to eventInfo
