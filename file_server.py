@@ -280,6 +280,75 @@ def clear_plans():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/plans/add', methods=['POST'])
+def add_plan():
+    """新增一条学习计划（用于记录计划外的实际学习行为）"""
+    try:
+        data = request.json
+        material_title = data.get('material_title')
+        material_domain = data.get('material_domain', 'work-ai')
+        material_url = data.get('material_url', '')
+        planned_hours = float(data.get('planned_hours', 0)) or 1.0
+        scheduled_date_str = data.get('scheduled_date')  # "YYYY-MM-DD"
+        time_slot = data.get('time_slot')  # "HH:MM-HH:MM"
+
+        if not material_title or not scheduled_date_str or not time_slot:
+            return jsonify({'success': False, 'error': '请填写资源、日期和时间段'}), 400
+
+        sched_date = date.fromisoformat(scheduled_date_str)
+        week_start = sched_date - timedelta(days=sched_date.weekday())
+
+        from core.db import get_connection
+        # 查找或创建 material_id
+        with get_connection() as conn:
+            row = conn.execute(
+                'SELECT id FROM materials WHERE title = ?', (material_title,)
+            ).fetchone()
+            db_material_id = row[0] if row else None
+
+        if db_material_id is None:
+            # 同步到 materials 表（只存基础字段）
+            with get_connection() as conn:
+                cursor = conn.execute('''
+                    INSERT INTO materials (title, domain, url, source_type, estimated_hours, status)
+                    VALUES (?, ?, ?, 'manual', ?, 'in_progress')
+                ''', (material_title, material_domain, material_url, planned_hours))
+                db_material_id = cursor.lastrowid
+
+        from core.db import create_plan
+        plan_id = create_plan(
+            week_start=week_start,
+            material_id=db_material_id,
+            planned_hours=planned_hours,
+            scheduled_date=sched_date,
+            time_slot=time_slot,
+            material_title=material_title,
+            material_domain=material_domain,
+            material_url=material_url
+        )
+
+        # 同步到 Calendar
+        if plan_id:
+            try:
+                from core.calendar_sync import _create_event
+                plan_info = {
+                    'id': plan_id,
+                    'title': material_title,
+                    'domain': material_domain,
+                    'url': material_url,
+                    'planned_hours': planned_hours,
+                    'scheduled_date': sched_date,
+                    'time_slot': time_slot,
+                }
+                _create_event(plan_info)
+            except Exception as e:
+                print(f"Calendar 同步失败: {e}")
+
+        return jsonify({'success': True, 'plan_id': plan_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/plans/delete', methods=['POST'])
 def delete_plan():
     """删除单个计划"""
