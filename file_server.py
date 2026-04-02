@@ -2,7 +2,7 @@
 极简文件读写服务
 只做 MD 文件读写 + 计划生成，不做业务逻辑
 """
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from pathlib import Path
 import sys
@@ -12,6 +12,18 @@ from datetime import date, timedelta
 
 app = Flask(__name__)
 CORS(app)
+
+# Dashboard 路径
+DASHBOARD_PATH = Path.home() / "Documents" / "self_learning" / "learning-assistant" / "dashboard" / "index.html"
+
+@app.route('/')
+def serve_dashboard():
+    """服务 Dashboard 页面"""
+    return send_file(DASHBOARD_PATH, mimetype='text/html; charset=utf-8')
+
+@app.route('/dashboard')
+def serve_dashboard_alt():
+    return send_file(DASHBOARD_PATH, mimetype='text/html; charset=utf-8')
 
 # 配置文件路径
 OBSIDIAN_PATH = Path.home() / "Documents" / "Obsidian Vault" / "学习助手" / "学习资料库.md"
@@ -48,6 +60,7 @@ def parse_md_table(content: str) -> list:
                 actual = cells[header_indices.get('已用(h)', 4)]
                 link = cells[header_indices.get('链接', 5)]
                 status = cells[header_indices.get('状态', 6)] if 6 < len(cells) else ''
+                frozen = cells[header_indices.get('冻结', 7)].strip().lower() == 'true' if 7 < len(cells) else False
 
                 # 解析链接
                 url = None
@@ -67,7 +80,8 @@ def parse_md_table(content: str) -> list:
                     'progress': int(progress) if progress and progress != '' else 0,
                     'actual_hours': float(actual) if actual and actual != '' else 0.0,
                     'url': url,
-                    'status': status
+                    'status': status,
+                    'frozen': frozen
                 })
             except (ValueError, IndexError):
                 continue
@@ -83,8 +97,8 @@ def generate_md_table(materials: list) -> str:
         "",
         "## 学习资源",
         "",
-        "| 标题 | 领域 | 预估(h) | 进度(%) | 已用(h) | 链接 | 状态 |",
-        "|------|------|----------|----------|----------|------|------|"
+        "| 标题 | 领域 | 预估(h) | 进度(%) | 已用(h) | 链接 | 状态 | 冻结 |",
+        "|------|------|----------|----------|----------|------|------|------|"
     ]
 
     for m in materials:
@@ -95,10 +109,11 @@ def generate_md_table(materials: list) -> str:
         actual = m.get('actual_hours', 0)
         url = m.get('url', '')
         status = m.get('status', '')
+        frozen = 'true' if m.get('frozen') else ''
 
         link = f"[链接]({url})" if url else ""
 
-        lines.append(f"| {title} | {domain} | {estimated} | {progress} | {actual} | {link} | {status} |")
+        lines.append(f"| {title} | {domain} | {estimated} | {progress} | {actual} | {link} | {status} | {frozen} |")
 
     lines.extend([
         "",
@@ -139,6 +154,7 @@ def update_resource():
         title = data.get('title')
         progress = data.get('progress')
         actual_hours = data.get('actual_hours')
+        frozen = data.get('frozen')
 
         if not title:
             return jsonify({'success': False, 'error': '标题不能为空'}), 400
@@ -156,6 +172,8 @@ def update_resource():
                     m['status'] = 'done' if progress >= 100 else ''
                 if actual_hours is not None:
                     m['actual_hours'] = actual_hours
+                if frozen is not None:
+                    m['frozen'] = bool(frozen)
                 updated = True
                 break
 
@@ -200,7 +218,8 @@ def add_resource():
             'progress': 0,
             'actual_hours': 0.0,
             'url': url,
-            'status': ''
+            'status': '',
+            'frozen': False
         })
 
         # 写回文件
@@ -274,7 +293,7 @@ def clear_plans():
         sys.path.insert(0, str(SKILL_PATH))
         from core.planner import clear_weekly_plan
 
-        count = clear_weekly_plan()
+        count = clear_weekly_plan(None)  # 内部用 today_cst() 计算周一开始
         return jsonify({'success': True, 'count': count})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

@@ -5,9 +5,14 @@ Apple Calendar同步模块
 import subprocess
 import json
 import sys
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone, timedelta as td
 from pathlib import Path
 from typing import List, Dict, Optional
+
+# 东八区当前日期
+def today_cst() -> date:
+    """返回 Asia/Shanghai 时区的今日日期"""
+    return datetime.now(timezone(td(hours=8))).date()
 
 # 处理相对导入
 try:
@@ -86,7 +91,7 @@ def _create_event(plan: Dict, override_start_time: str = None, override_end_time
     if isinstance(scheduled_date, str):
         scheduled_date = date.fromisoformat(scheduled_date)
     elif not isinstance(scheduled_date, date):
-        scheduled_date = date.today()
+        scheduled_date = today_cst()
 
     # 解析时间段
     time_slot = plan['time_slot']  # "09:00-12:00"
@@ -103,44 +108,31 @@ def _create_event(plan: Dict, override_start_time: str = None, override_end_time
     actual_end = override_end_time or end_time_str
     print(f"    创建事件: {title} @ {scheduled_date} {actual_start}-{actual_end}")
 
-    # 解析时间
+    # 解析时间分量
     start_h, start_m = actual_start.split(':')
     end_h, end_m = actual_end.split(':')
 
-    # 构建AppleScript - 使用format避免花括号冲突
-    script_template = '''tell application "Calendar"
-    set calName to "{cal_name}"
+    # 关键：先设 day=1 避免溢出，再设 month/year，再设 hours/minutes
+    script = f'''tell application "Calendar"
+    set calName to "{CALENDAR_NAME}"
     set myCal to first calendar whose name is calName
     set startDate to (current date)
-    set year of startDate to {year}
-    set month of startDate to {month}
-    set day of startDate to {day}
-    set hours of startDate to {start_h}
-    set minutes of startDate to {start_m}
+    set day of startDate to {scheduled_date.day}
+    set month of startDate to {scheduled_date.month}
+    set year of startDate to {scheduled_date.year}
+    set hours of startDate to {int(start_h)}
+    set minutes of startDate to {int(start_m)}
     set seconds of startDate to 0
     set endDate to (current date)
-    set year of endDate to {year}
-    set month of endDate to {month}
-    set day of endDate to {day}
-    set hours of endDate to {end_h}
-    set minutes of endDate to {end_m}
+    set day of endDate to {scheduled_date.day}
+    set month of endDate to {scheduled_date.month}
+    set year of endDate to {scheduled_date.year}
+    set hours of endDate to {int(end_h)}
+    set minutes of endDate to {int(end_m)}
     set seconds of endDate to 0
-    make new event at end of events of myCal with properties {{summary:"{title}", start date:startDate, end date:endDate, description:"{desc}"}}
+    make new event at end of events of myCal with properties {{summary:"{title}", start date:startDate, end date:endDate, description:"{description}"}}
     return "Created"
 end tell'''
-
-    script = script_template.format(
-        cal_name=CALENDAR_NAME,
-        year=scheduled_date.year,
-        month=scheduled_date.month,
-        day=scheduled_date.day,
-        start_h=start_h,
-        start_m=start_m,
-        end_h=end_h,
-        end_m=end_m,
-        title=title,
-        desc=description
-    )
 
     result = _run_applescript(script)
     success = result == "Created"
@@ -201,31 +193,31 @@ def _update_event(plan_id: int, scheduled_date: date, new_start_time: str, new_e
     return True
 
 
-def _clear_week_events(week_start: date):
+def _clear_week_events(week_start: date, week_end: date = None):
     """清除本周学习助手日历中的学习事件（只删除以[学习]开头的事件）"""
-    week_end = week_start + timedelta(days=7)
+    if week_end is None:
+        week_end = week_start + timedelta(days=7)
 
-    # 先获取本周所有以"[学习]"开头的事件ID，然后逐个删除
-    script_template = '''tell application "Calendar"
-    set calName to "{cal_name}"
+    script = f'''tell application "Calendar"
+    set calName to "{CALENDAR_NAME}"
     try
         set myCal to first calendar whose name is calName
         set eventIDs to {{}}
-
-        -- 构建日期范围
         set startRange to (current date)
-        set year of startRange to {start_year}
-        set month of startRange to {start_month}
-        set day of startRange to {start_day}
-        set time of startRange to 0
-
+        set day of startRange to {week_start.day}
+        set month of startRange to {week_start.month}
+        set year of startRange to {week_start.year}
+        set hours of startRange to 0
+        set minutes of startRange to 0
+        set seconds of startRange to 0
         set endRange to (current date)
-        set year of endRange to {end_year}
-        set month of endRange to {end_month}
-        set day of endRange to {end_day}
-        set time of endRange to 0
+        set day of endRange to {week_end.day}
+        set month of endRange to {week_end.month}
+        set year of endRange to {week_end.year}
+        set hours of endRange to 0
+        set minutes of endRange to 0
+        set seconds of endRange to 0
 
-        -- 收集要删除的事件ID
         set evtList to every event of myCal
         repeat with i from 1 to (count of evtList)
             set evt to item i of evtList
@@ -237,7 +229,6 @@ def _clear_week_events(week_start: date):
             end if
         end repeat
 
-        -- 根据ID删除事件（避免迭代中修改）
         set deletedCount to 0
         repeat with evtID in eventIDs
             try
@@ -253,32 +244,24 @@ def _clear_week_events(week_start: date):
     end try
 end tell'''
 
-    script = script_template.format(
-        cal_name=CALENDAR_NAME,
-        start_year=week_start.year,
-        start_month=week_start.month,
-        start_day=week_start.day,
-        end_year=week_end.year,
-        end_month=week_end.month,
-        end_day=week_end.day
-    )
-
     result = _run_applescript(script)
     print(f"  [Calendar] {result}")
 
 
 def _clear_future_events(from_date: date):
     """清除学习助手日历中从指定日期开始的所有未来事件"""
-    script_template = '''tell application "Calendar"
-    set calName to "{cal_name}"
+    script = f'''tell application "Calendar"
+    set calName to "{CALENDAR_NAME}"
     try
         set myCal to first calendar whose name is calName
         set eventsToDelete to {{}}
-
         set startRange to (current date)
-        set year of startRange to {year}
-        set month of startRange to {month}
-        set day of startRange to {day}
+        set day of startRange to {from_date.day}
+        set month of startRange to {from_date.month}
+        set year of startRange to {from_date.year}
+        set hours of startRange to 0
+        set minutes of startRange to 0
+        set seconds of startRange to 0
 
         set evtList to every event of myCal
         repeat with i from 1 to (count of evtList)
@@ -298,20 +281,13 @@ def _clear_future_events(from_date: date):
     end try
 end tell'''
 
-    script = script_template.format(
-        cal_name=CALENDAR_NAME,
-        year=from_date.year,
-        month=from_date.month,
-        day=from_date.day
-    )
-
     result = _run_applescript(script)
     return result == "Cleared"
 
 
 def check_today_completion() -> List[Dict]:
     """检查今日日历事件的完成情况"""
-    today = date.today()
+    today = today_cst()
 
     # 从Calendar获取今日事件
     events = _get_today_events()
@@ -339,7 +315,7 @@ def check_today_completion() -> List[Dict]:
 
 def _get_today_events() -> List[Dict]:
     """获取今日学习助手日历中的事件"""
-    today = date.today()
+    today = today_cst()
     tomorrow = today + timedelta(days=1)
 
     script = f'''
@@ -349,8 +325,20 @@ def _get_today_events() -> List[Dict]:
             set myCal to first calendar whose name is calName
             set eventList to {{}}
 
-            set startRange to date "{today.strftime('%Y-%m-%d')}"
-            set endRange to date "{tomorrow.strftime('%Y-%m-%d')}"
+            set startRange to (current date)
+            set day of startRange to {today.day}
+            set month of startRange to {today.month}
+            set year of startRange to {today.year}
+            set hours of startRange to 0
+            set minutes of startRange to 0
+            set seconds of startRange to 0
+            set endRange to (current date)
+            set day of endRange to {tomorrow.day}
+            set month of endRange to {tomorrow.month}
+            set year of endRange to {tomorrow.year}
+            set hours of endRange to 0
+            set minutes of endRange to 0
+            set seconds of endRange to 0
 
             set evtList to every event of myCal
             repeat with i from 1 to (count of evtList)
@@ -431,15 +419,15 @@ def quick_add_event(title: str, date_str: str, start_time: str, end_time: str):
     script_template = '''tell application "Calendar"
     set myCal to first calendar whose name is "{cal_name}"
     set startDate to (current date)
-    set year of startDate to {y}
-    set month of startDate to {m}
     set day of startDate to {d}
+    set month of startDate to {m}
+    set year of startDate to {y}
     set hours of startDate to {start_h}
     set minutes of startDate to {start_m}
     set endDate to (current date)
-    set year of endDate to {y}
-    set month of endDate to {m}
     set day of endDate to {d}
+    set month of endDate to {m}
+    set year of endDate to {y}
     set hours of endDate to {end_h}
     set minutes of endDate to {end_m}
     make new event at end of events of myCal with properties {{summary:"{title}", start date:startDate, end date:endDate}}
@@ -461,15 +449,6 @@ def sync_session_to_calendar(material_id: int, actual_start: str, actual_end: st
                              actual_hours: float, quality_rating: int = 3) -> bool:
     """
     将学习记录同步到Apple Calendar的过去时间中
-
-    这是"强联动"的关键：学习完成后，在Calendar中创建已完成的事件
-
-    Args:
-        material_id: 资料ID
-        actual_start: 实际开始时间 (ISO格式, e.g., "2026-03-21T09:00:00")
-        actual_end: 实际结束时间 (ISO格式, e.g., "2026-03-21T11:00:00")
-        actual_hours: 实际学习时长
-        quality_rating: 质量评分 1-5
     """
     if not ensure_calendar_exists():
         print("⚠️ 无法创建日历，请检查权限")
@@ -504,7 +483,6 @@ def sync_session_to_calendar(material_id: int, actual_start: str, actual_end: st
             end_dt = actual_end
     except Exception as e:
         print(f"❌ 时间格式错误: {e}")
-        # 如果解析失败，使用当前时间回推
         end_dt = datetime.now()
         start_dt = end_dt - timedelta(hours=actual_hours)
 
@@ -513,43 +491,26 @@ def sync_session_to_calendar(material_id: int, actual_start: str, actual_end: st
     event_title = f"[✓已完成] {domain_name} | {title}"
     description = f"实际学习: {actual_hours}小时\n质量评分: {'⭐' * quality_rating}\n资料ID: {material_id}"
 
-    # 创建日历事件（在过去的时间）
-    script_template = '''tell application "Calendar"
-    set calName to "{cal_name}"
+    script = f'''tell application "Calendar"
+    set calName to "{CALENDAR_NAME}"
     set myCal to first calendar whose name is calName
     set startDate to (current date)
-    set year of startDate to {start_year}
-    set month of startDate to {start_month}
-    set day of startDate to {start_day}
-    set hours of startDate to {start_h}
-    set minutes of startDate to {start_m}
+    set day of startDate to {start_dt.day}
+    set month of startDate to {start_dt.month}
+    set year of startDate to {start_dt.year}
+    set hours of startDate to {start_dt.hour}
+    set minutes of startDate to {start_dt.minute}
     set seconds of startDate to 0
     set endDate to (current date)
-    set year of endDate to {end_year}
-    set month of endDate to {end_month}
-    set day of endDate to {end_day}
-    set hours of endDate to {end_h}
-    set minutes of endDate to {end_m}
+    set day of endDate to {end_dt.day}
+    set month of endDate to {end_dt.month}
+    set year of endDate to {end_dt.year}
+    set hours of endDate to {end_dt.hour}
+    set minutes of endDate to {end_dt.minute}
     set seconds of endDate to 0
-    make new event at end of events of myCal with properties {{summary:"{title}", start date:startDate, end date:endDate, description:"{desc}"}}
+    make new event at end of events of myCal with properties {{summary:"{event_title}", start date:startDate, end date:endDate, description:"{description}"}}
     return "Created"
 end tell'''
-
-    script = script_template.format(
-        cal_name=CALENDAR_NAME,
-        start_year=start_dt.year,
-        start_month=start_dt.month,
-        start_day=start_dt.day,
-        start_h=start_dt.hour,
-        start_m=start_dt.minute,
-        end_year=end_dt.year,
-        end_month=end_dt.month,
-        end_day=end_dt.day,
-        end_h=end_dt.hour,
-        end_m=end_dt.minute,
-        title=event_title,
-        desc=description
-    )
 
     result = _run_applescript(script)
     success = result == "Created"

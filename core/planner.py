@@ -5,7 +5,7 @@
 """
 import sys
 import re
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone, timedelta as td
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -21,6 +21,12 @@ except ImportError:
 
 # Obsidian 文件路径
 OBSIDIAN_PATH = Path.home() / "Documents" / "Obsidian Vault" / "学习助手" / "学习资料库.md"
+
+
+# 东八区当前日期
+def today_cst() -> date:
+    """返回 Asia/Shanghai 时区的今日日期"""
+    return datetime.now(timezone(td(hours=8))).date()
 
 
 def parse_md_table(content: str) -> List[Dict]:
@@ -57,6 +63,7 @@ def parse_md_table(content: str) -> List[Dict]:
                 estimated = cells[header_indices.get('预估(h)', 2)]
                 progress = cells[header_indices.get('进度(%)', 3)]
                 link = cells[header_indices.get('链接', 5)]
+                frozen_str = cells[header_indices.get('冻结', 7)].strip().lower() if 7 < len(cells) else ''
 
                 # 解析链接
                 url = None
@@ -75,7 +82,8 @@ def parse_md_table(content: str) -> List[Dict]:
                     'estimated_hours': float(estimated) if estimated and estimated != '' else 2.0,
                     'progress': int(progress) if progress and progress != '' else 0,
                     'url': url,
-                    'status': 'completed' if (progress and int(progress) >= 100) else ('in_progress' if (progress and int(progress) > 0) else 'pending')
+                    'status': 'completed' if (progress and int(progress) >= 100) else ('in_progress' if (progress and int(progress) > 0) else 'pending'),
+                    'frozen': frozen_str == 'true'
                 })
             except (ValueError, IndexError):
                 continue
@@ -84,15 +92,15 @@ def parse_md_table(content: str) -> List[Dict]:
 
 
 def get_active_materials() -> List[Dict]:
-    """获取未完成的资料（用于生成计划）"""
+    """获取进行中的资料（用于生成计划）：progress > 0 && < 100 && 未冻结"""
     if not OBSIDIAN_PATH.exists():
         return []
 
     content = OBSIDIAN_PATH.read_text(encoding='utf-8')
     materials = parse_md_table(content)
 
-    # 过滤未完成的
-    return [m for m in materials if m['status'] != 'completed']
+    # 只选已开始但未完成的、未冻结的（右边栏）
+    return [m for m in materials if 0 < m.get('progress', 0) < 100 and not m.get('frozen', False)]
 
 
 def calculate_priority(material: Dict) -> float:
@@ -116,21 +124,21 @@ def generate_weekly_plan(week_start: Optional[date] = None, clear_existing: bool
     生成本周学习计划
 
     策略:
-    1. 读取 MD 表格，过滤未完成资料
+    1. 读取 MD 表格，过滤未完成、未冻结的资料
     2. 周末(六日): 技术类任务，2-3小时/段
     3. 周内(一至五): 阅读类任务，1小时/晚
     4. 只安排今天或未来的日期
     """
-    today = date.today()
+    today = today_cst()
 
     if week_start is None:
-        week_start = today - timedelta(days=today.weekday())
+        week_start = today - timedelta(days=today.weekday())  # 本周一
 
     # 清除本周已有计划
     if clear_existing:
         clear_weekly_plan(week_start)
 
-    # 从 MD 读取未完成的资料
+    # 从 MD 读取未完成、未冻结的资料
     materials = get_active_materials()
 
     if not materials:
@@ -161,7 +169,7 @@ def generate_weekly_plan(week_start: Optional[date] = None, clear_existing: bool
     # 周日安排
     sunday = week_start + timedelta(days=6)
     if sunday >= today:
-        used_keys = {t['key'] for t in saturday_tasks}
+        used_keys = {t['key'] for t in plan}
         sunday_tasks = _plan_day(
             date=sunday,
             available_slots=TIME_RULES['weekend']['slots'],
@@ -171,7 +179,7 @@ def generate_weekly_plan(week_start: Optional[date] = None, clear_existing: bool
         )
         plan.extend(sunday_tasks)
 
-    # 周内安排
+    # 周内安排（周一到周五）
     used_keys = {t['key'] for t in plan}
     for i in range(5):
         weekday = week_start + timedelta(days=i)
@@ -193,7 +201,7 @@ def generate_weekly_plan(week_start: Optional[date] = None, clear_existing: bool
     for task in plan:
         plan_id = create_plan(
             week_start=week_start,
-            material_id=task['key'],  # 使用 key 作为标识
+            material_id=task['key'],
             planned_hours=task['hours'],
             scheduled_date=task['date'],
             time_slot=task['time_slot'],
@@ -205,7 +213,7 @@ def generate_weekly_plan(week_start: Optional[date] = None, clear_existing: bool
         saved_plans.append(task)
 
     # 同步到 Calendar
-    _sync_to_calendar(saved_plans)
+    _sync_to_calendar(saved_plans, week_start)
 
     return saved_plans
 
@@ -253,26 +261,25 @@ def _plan_day(date: date, available_slots: List[tuple],
     return tasks
 
 
-def _sync_to_calendar(plans: List[Dict]):
+def _sync_to_calendar(plans: List[Dict], week_start: date):
     """同步计划到 Apple Calendar"""
     try:
         from .calendar_sync import sync_week_to_calendar
-        week_start = date.today() - timedelta(days=date.today().weekday())
-        sync_week_to_calendar(week_start)
+        sync_week_to_calendar(week_start)  # 同步 week_start 到 week_start+6，覆盖今天到周日
     except Exception as e:
         print(f"Calendar 同步失败: {e}")
 
 
 def clear_weekly_plan(week_start: Optional[date] = None) -> int:
-    """清除本周的学习计划"""
+    """清除本周的学习计划（按 week_start 锚点）"""
     if week_start is None:
-        today = date.today()
+        today = today_cst()
         week_start = today - timedelta(days=today.weekday())
-
+    week_end = week_start + timedelta(days=7)
     # 清除 Calendar
     try:
         from .calendar_sync import _clear_week_events
-        _clear_week_events(week_start)
+        _clear_week_events(week_start, week_end)
     except Exception as e:
         print(f"清除 Calendar 失败: {e}")
 
@@ -295,10 +302,11 @@ def clear_weekly_plan(week_start: Optional[date] = None) -> int:
 
 
 def get_plan_summary(week_start: Optional[date] = None) -> Dict:
-    """获取计划摘要（返回结构化数据）"""
+    """获取计划摘要（返回结构化数据）：本周一到本周日"""
+    today = today_cst()
+
     if week_start is None:
-        today = date.today()
-        week_start = today - timedelta(days=today.weekday())
+        week_start = today - timedelta(days=today.weekday())  # 本周一
 
     with get_connection() as conn:
         cursor = conn.execute('''
@@ -311,8 +319,10 @@ def get_plan_summary(week_start: Optional[date] = None) -> Dict:
         ''', (week_start,))
         rows = cursor.fetchall()
 
+    week_end = week_start + timedelta(days=6)
+
     if not rows:
-        return {'plans': [], 'week': str(week_start)}
+        return {'plans': [], 'week': str(week_start), 'week_end': str(week_end)}
 
     plans = []
     for row in rows:
@@ -333,5 +343,5 @@ def get_plan_summary(week_start: Optional[date] = None) -> Dict:
     return {
         'plans': plans,
         'week': str(week_start),
-        'week_end': str(week_start + timedelta(days=6))
+        'week_end': str(week_end)
     }

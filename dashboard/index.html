@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学习助手</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 0;
+            overscroll-behavior: none;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #eee;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #0f3460; }
+        h1 { color: #00d4aa; font-size: 24px; }
+        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+        .btn-primary { background: #00d4aa; color: #000; }
+        .btn-primary:hover { background: #00b894; }
+        .btn-secondary { background: #0f3460; color: #eee; }
+        .btn-secondary:hover { background: #1a4a7a; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .tag-done { background: #1a5c3a; color: #00d4aa; padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; }
+        .resource-actions { display: flex; gap: 6px; align-items: center; }
+        .drag-col { background: rgba(15,52,96,0.35); border-radius: 12px; padding: 14px; min-height: 200px; }
+        .drag-col-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .drag-col-title { font-size: 14px; color: #64b5f6; font-weight: 600; }
+        .drag-item { background: rgba(0,0,0,0.25); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; cursor: grab; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s; }
+        .drag-item:hover { background: rgba(0,0,0,0.4); }
+        .drag-item:active { cursor: grabbing; }
+        .drag-over { background: rgba(0,212,170,0.15) !important; border: 2px dashed #00d4aa; }
+        .sub-header { font-size: 12px; color: #888; margin: 10px 0 6px; font-weight: 500; }
+        .nav-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .nav-tab { padding: 10px 20px; background: #0f3460; border: none; color: #888; border-radius: 8px; cursor: pointer; }
+        .nav-tab.active { background: #00d4aa; color: #000; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .card { background: rgba(15,52,96,0.5); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        .card-title { font-size: 16px; color: #64b5f6; margin-bottom: 15px; font-weight: 600; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .section-title { font-size: 14px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat-box { background: rgba(0,0,0,0.2); padding: 16px; border-radius: 10px; text-align: center; }
+        .stat-value { font-size: 28px; font-weight: bold; color: #00d4aa; }
+        .stat-label { font-size: 12px; color: #888; margin-top: 4px; }
+        .resource-item { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+        .resource-title { font-size: 14px; font-weight: 500; }
+        .resource-title a { color: #64b5f6; text-decoration: none; }
+        .resource-title a:hover { text-decoration: underline; }
+        .resource-meta { font-size: 12px; color: #888; margin-top: 4px; }
+        .progress-item { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 8px 14px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+        .progress-title { font-size: 14px; font-weight: 500; }
+        .progress-title a { color: #64b5f6; text-decoration: none; }
+        .progress-meta { font-size: 12px; color: #888; }
+        .progress-bar-inline { background: rgba(255,255,255,0.1); border-radius: 4px; height: 8px; width: 60px; overflow: hidden; flex-shrink: 0; }
+        .progress-bar-fill { height: 100%; background: linear-gradient(90deg, #e67e22, #00d4aa); border-radius: 4px; transition: width 0.3s; }
+        .progress-pct { font-size: 11px; color: #888; width: 28px; text-align: right; flex-shrink: 0; }
+        .progress-controls { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+        .btn-small { padding: 5px 10px; font-size: 12px; }
+        .plan-day { background: rgba(0,0,0,0.15); border-radius: 10px; padding: 15px; margin-bottom: 15px; }
+        .plan-date { font-size: 14px; color: #64b5f6; font-weight: 600; margin-bottom: 12px; }
+        .plan-task { display: flex; align-items: center; gap: 10px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 6px; margin-bottom: 8px; }
+        .plan-task.completed { opacity: 0.5; }
+        .task-checkbox { width: 18px; height: 18px; cursor: pointer; accent-color: #00d4aa; }
+        .task-time { font-size: 12px; color: #888; font-family: monospace; width: 80px; }
+        .task-domain { font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 500; }
+        .task-domain.work-ai { background: rgba(233,69,96,0.2); color: #ff6b6b; }
+        .task-domain.dsml { background: rgba(0,212,170,0.2); color: #00d4aa; }
+        .task-domain.quant { background: rgba(243,156,18,0.2); color: #f39c12; }
+        .task-domain.philosophy { background: rgba(155,89,182,0.2); color: #bb8fce; }
+        .task-domain.literature { background: rgba(52,152,219,0.2); color: #5dade2; }
+        .task-domain.physics { background: rgba(26,188,156,0.2); color: #48c9b0; }
+        .task-title { flex: 1; font-size: 13px; }
+        .task-hours { font-size: 11px; color: #888; }
+        .task-actions { display: flex; gap: 4px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: #1a1a2e; border: 1px solid #0f3460; border-radius: 16px; padding: 24px; max-width: 500px; width: 90%; }
+        .modal-title { font-size: 18px; color: #00d4aa; margin-bottom: 20px; font-weight: 600; }
+        .modal-body { margin-bottom: 20px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-size: 13px; color: #888; margin-bottom: 6px; }
+        .form-group input, .form-group select { width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid #0f3460; border-radius: 6px; color: #eee; font-size: 14px; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .empty-state { text-align: center; padding: 16px; color: #888; font-size: 14px; }
+        .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #0f3460; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 14px; display: none; z-index: 2000; }
+        .toast.error { background: #e74c3c; }
+        .toast.success { background: #27ae60; }
+        .panel { background: rgba(15,52,96,0.5); border-radius: 12px; padding: 16px; }
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .panel-title { font-size: 15px; font-weight: 600; color: #64b5f6; }
+        .ach-item { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .ach-item:last-child { border-bottom: none; }
+        .ach-title { flex: 1; font-size: 13px; }
+        .ach-meta { font-size: 11px; color: #888; }
+        .ach-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .ach-stat { background: rgba(0,0,0,0.2); padding: 14px; border-radius: 8px; text-align: center; }
+        .ach-stat-val { font-size: 22px; font-weight: bold; color: #00d4aa; }
+        .ach-stat-lbl { font-size: 11px; color: #888; margin-top: 2px; }
+        .domain-tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-right: 6px; }
+        .domain-tag.work-ai { background: rgba(233,69,96,0.2); color: #ff6b6b; }
+        .domain-tag.dsml { background: rgba(0,212,170,0.2); color: #00d4aa; }
+        .domain-tag.quant { background: rgba(243,156,18,0.2); color: #f39c12; }
+        .domain-tag.philosophy { background: rgba(155,89,182,0.2); color: #bb8fce; }
+        .domain-tag.literature { background: rgba(52,152,219,0.2); color: #5dade2; }
+        .domain-tag.physics { background: rgba(26,188,156,0.2); color: #48c9b0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header><h1>📚 学习助手</h1></header>
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="showTab('overview')">📊 资源总览</button>
+            <button class="nav-tab" onclick="showTab('plan')">📅 本周计划</button>
+            <button class="nav-tab" onclick="showTab('achievements')">🏆 成果</button>
+        </div>
+
+        <div id="overview" class="tab-content active">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <!-- 左栏：冻结中 -->
+                <div class="drag-col" id="freezeCol" ondragenter="onDragEnter(event)" ondragover="onDragOver(event)" ondrop="onDropToFreeze(event)" ondragleave="onDragLeave(event)">
+                    <div class="drag-col-header">
+                        <span class="drag-col-title">⏸ 冻结中</span>
+                        <button class="btn btn-primary btn-small" onclick="showAddResourceModal()">+ 新增</button>
+                    </div>
+                    <div class="sub-header">✅ 已完成</div>
+                    <div id="freezeDoneList" ondragenter="onDragEnter(event)" ondragover="onDragOver(event)" ondrop="onDropToFreeze(event)" ondragleave="onDragLeave(event)"></div>
+                    <div class="sub-header">⏸ 暂停</div>
+                    <div id="freezePausedList" ondragenter="onDragEnter(event)" ondragover="onDragOver(event)" ondrop="onDropToFreeze(event)" ondragleave="onDragLeave(event)"></div>
+                </div>
+                <!-- 右栏：进行中 -->
+                <div class="drag-col" id="activeCol" ondragenter="onDragEnter(event)" ondragover="onDragOver(event)" ondrop="onDropToActive(event)" ondragleave="onDragLeave(event)">
+                    <div class="drag-col-header">
+                        <span class="drag-col-title">⚡ 进行中</span>
+                    </div>
+                    <div id="activeList" ondragenter="onDragEnter(event)" ondragover="onDragOver(event)" ondrop="onDropToActive(event)" ondragleave="onDragLeave(event)"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="plan" class="tab-content">
+            <div style="margin-bottom:15px">
+                <button class="btn btn-primary" onclick="generatePlan()">🔄 生成计划</button>
+                <button class="btn btn-secondary" onclick="clearPlan()">清除计划</button>
+                <button class="btn btn-secondary" onclick="showNewPlanModal()">+ 新增</button>
+            </div>
+            <div class="card">
+                <div class="card-title" id="planTitle">本周学习计划</div>
+                <div id="planList"></div>
+            </div>
+        </div>
+
+        <div id="achievements" class="tab-content">
+            <div style="margin-bottom:15px"><button class="btn btn-primary" onclick="loadAchievements()">🔄 更新看板</button></div>
+            <div id="achStats" class="ach-stats-grid"></div>
+            <div id="achDomain" style="margin-bottom:20px;display:flex;gap:10px;flex-wrap:wrap"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">✅ 已完成</span>
+                        <span id="achCompletedCount" style="color:#888;font-size:13px">0</span>
+                    </div>
+                    <ul id="achCompletedList" style="list-style:none"></ul>
+                </div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">🎯 进行中</span>
+                        <span id="achInProgressCount" style="color:#888;font-size:13px">0</span>
+                    </div>
+                    <ul id="achInProgressList" style="list-style:none"></ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增资源弹窗 -->
+    <div class="modal" id="addResourceModal">
+        <div class="modal-content">
+            <div class="modal-title">新增学习资源</div>
+            <div class="modal-body">
+                <div class="form-group"><label>资料标题 *</label><input type="text" id="addResTitle" placeholder="例如：《深度学习》"></div>
+                <div class="form-group">
+                    <label>领域</label>
+                    <select id="addResDomain">
+                        <option value="work-ai">工作-AI开发</option>
+                        <option value="dsml">兴趣-DS/ML</option>
+                        <option value="quant">兴趣-Quant</option>
+                        <option value="philosophy">阅读-哲学</option>
+                        <option value="literature">阅读-文学</option>
+                        <option value="physics">阅读-物理</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>预估学时</label><input type="number" id="addResHours" value="10" min="1" step="0.5"></div>
+                <div class="form-group"><label>链接（可选）</label><input type="text" id="addResUrl" placeholder="https://..."></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideAddResourceModal()">取消</button>
+                <button class="btn btn-primary" onclick="submitAddResource()">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 修改/新增计划弹窗 -->
+    <div class="modal" id="editPlanModal">
+        <div class="modal-content">
+            <div class="modal-title" id="editPlanModalTitle">修改计划</div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>学习资源</label>
+                    <select id="editPlanResource" style="width:100%;padding:10px;background:rgba(0,0,0,0.3);border:1px solid #0f3460;border-radius:6px;color:#eee;font-size:14px"></select>
+                </div>
+                <div class="form-group"><label>日期</label><input type="date" id="editPlanDate" style="width:100%;padding:10px;background:rgba(0,0,0,0.3);border:1px solid #0f3460;border-radius:6px;color:#eee;font-size:14px"></div>
+                <div class="form-group"><label>时间段 (如 09:00-12:00)</label><input type="text" id="editPlanTimeSlot" placeholder="09:00-12:00" style="width:100%;padding:10px;background:rgba(0,0,0,0.3);border:1px solid #0f3460;border-radius:6px;color:#eee;font-size:14px"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideEditPlanModal()">取消</button>
+                <button class="btn btn-primary" onclick="submitEditPlan()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const API = 'http://localhost:5001/api';
+        let allResources = [];
+
+        function showTab(name) {
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+            document.getElementById(name).classList.add('active');
+            event.target.classList.add('active');
+            if (name === 'plan') loadPlan();
+            if (name === 'achievements') loadAchievements();
+        }
+
+        // ========== 资源总览 ==========
+        async function loadResources() {
+            try {
+                const resp = await fetch(`${API}/resources`);
+                const data = await resp.json();
+                if (data.success) { allResources = data.resources; renderResources(); }
+            } catch (e) { showToast('加载失败，请确保服务已启动', 'error'); }
+        }
+
+        // ========== 拖拽状态 ==========
+        let draggedTitle = null;
+
+        function renderResources() {
+            const freezeDone = allResources.filter(r => r.progress >= 100);
+            // 冻结栏：frozen=true 或 progress=0
+            const freezePaused = allResources.filter(r => r.frozen || r.progress === 0);
+            // 进行中栏：progress 1-99 且未冻结
+            const activeList = allResources.filter(r => r.progress > 0 && r.progress < 100 && !r.frozen);
+
+            // 左栏：已完成
+            document.getElementById('freezeDoneList').innerHTML = freezeDone.length === 0
+                ? '<div class="empty-state" style="font-size:13px;padding:8px">暂无</div>'
+                : freezeDone.map(r => buildDragItem(r, true)).join('');
+
+            // 左栏：冻结/暂停
+            document.getElementById('freezePausedList').innerHTML = freezePaused.length === 0
+                ? '<div class="empty-state" style="font-size:13px;padding:8px">暂无</div>'
+                : freezePaused.map(r => buildDragItem(r, false)).join('');
+
+            // 右栏：进行中
+            document.getElementById('activeList').innerHTML = activeList.length === 0
+                ? '<div class="empty-state" style="font-size:13px;padding:8px">暂无进行中的资源，拖动左侧项目开始学习</div>'
+                : activeList.map(r => buildDragItem(r, false)).join('');
+        }
+
+        function buildDragItem(r, isDone) {
+            const title = r.title.replace(/'/g, "\\'");
+            const domain = (r.domain||'').replace(/'/g, "\\'");
+            if (isDone) {
+                return `<div class="drag-item" draggable="true" ondragstart="onDragStart(event, '${title}')">
+                    <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+                        <span class="tag-done">✓ done</span>
+                        <span class="resource-title" style="color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.url ? `<a href="${r.url}" target="_blank" style="color:#64b5f6;text-decoration:none">${r.title}</a>` : r.title}</span>
+                    </div>
+                    <span style="font-size:11px;color:#888">${r.domain}</span>
+                </div>`;
+            }
+            const pct = r.progress;
+            return `<div class="drag-item" draggable="true" ondragstart="onDragStart(event, '${title}')">
+                <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+                    <div class="progress-bar-inline"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
+                    <span class="progress-pct" style="width:28px">${pct}%</span>
+                    <span class="resource-title" style="color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.url ? `<a href="${r.url}" target="_blank" style="color:#64b5f6;text-decoration:none">${r.title}</a>` : r.title}</span>
+                </div>
+                <div class="resource-actions">
+                    <button class="btn btn-small btn-secondary" onclick="showProgressModal('${title}',${pct},${r.actual_hours||0},'${domain}')" title="更新进度">✏️</button>
+                    <button class="btn btn-small btn-danger" onclick="deleteResource('${title}')" title="删除">✕</button>
+                </div>
+            </div>`;
+        }
+
+        function onDragStart(e, title) {
+            draggedTitle = title;
+            e.dataTransfer.setData('text/plain', title);
+            e.dataTransfer.effectAllowed = 'move';
+            console.log('dragstart:', title);
+        }
+
+        function onDragEnter(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.currentTarget.classList.add('drag-over');
+            console.log('dragenter on', e.currentTarget.id || e.currentTarget.className);
+        }
+
+        function onDragOver(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.currentTarget.classList.add('drag-over');
+        }
+
+        function onDragLeave(e) {
+            e.stopPropagation();
+            // 只有真正离开 drop zone 时才移除 class
+            if (!e.currentTarget.contains(e.relatedTarget)) {
+                e.currentTarget.classList.remove('drag-over');
+            }
+        }
+
+        async function onDropToActive(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.currentTarget.classList.remove('drag-over');
+            const dragged = e.dataTransfer.getData('text/plain') || draggedTitle;
+            if (!dragged) return;
+            const r = allResources.find(m => m.title === dragged);
+            if (!r) return;
+
+            if (r.progress >= 100) {
+                // 已完成 → 解冻：99，调 API 后统一刷新
+                await fetch(`${API}/resources/update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: r.title, frozen: false })
+                });
+                loadAchievements();
+            } else if (r.frozen) {
+                // 冻结栏 → 解冻：调 API，API 返回后统一刷新
+                await fetch(`${API}/resources/update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: r.title, frozen: false })
+                });
+                loadAchievements();
+            } else {
+                showToast('已在进行中', '');
+            }
+            draggedTitle = null;
+        }
+
+        async function onDropToFreeze(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.currentTarget.classList.remove('drag-over');
+            const dragged = e.dataTransfer.getData('text/plain') || draggedTitle;
+            if (!dragged) return;
+            const r = allResources.find(m => m.title === dragged);
+            if (!r) return;
+
+            if (r.progress === 0) {
+                showToast('已在暂停', '');
+            } else if (r.progress >= 100) {
+                showToast('已在完成', '');
+            } else {
+                // 进行中 → 冻结：调 API，API 返回后 loadAchievements 统一刷新所有状态
+                await fetch(`${API}/resources/update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: r.title, frozen: true })
+                });
+                loadAchievements();
+            }
+            draggedTitle = null;
+        }
+
+        function updateResourceProgress(title, newProgress) {
+            console.log('updateResourceProgress:', title, '→', newProgress);
+            fetch(`${API}/resources/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, progress: newProgress })
+            })
+            .then(r => r.json())
+            .then(d => {
+                console.log('API response:', d);
+                if (d.success) {
+                    showToast(newProgress > 0 && newProgress < 100 ? '已进入进行中' : '已冻结', 'success');
+                    loadResources();
+                    loadAchievements();
+                } else {
+                    showToast(d.error || '失败', 'error');
+                }
+            })
+            .catch(e => { console.error('fetch error:', e); showToast('请求失败', 'error'); });
+        }
+
+
+        async function deleteResource(title) {
+            if (!confirm(`确定删除「${title}」？`)) return;
+            try {
+                const resp = await fetch(`${API}/resources/delete`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title}) });
+                const d = await resp.json();
+                if (d.success) { showToast('已删除', 'success'); loadResources(); }
+                else showToast(d.error, 'error');
+            } catch (e) { showToast('请求失败', 'error'); }
+        }
+
+        function showAddResourceModal() {
+            document.getElementById('addResTitle').value = '';
+            document.getElementById('addResDomain').value = 'work-ai';
+            document.getElementById('addResHours').value = '10';
+            document.getElementById('addResUrl').value = '';
+            document.getElementById('addResourceModal').classList.add('active');
+        }
+        function hideAddResourceModal() { document.getElementById('addResourceModal').classList.remove('active'); }
+        async function submitAddResource() {
+            const title = document.getElementById('addResTitle').value.trim();
+            const domain = document.getElementById('addResDomain').value;
+            const estimated_hours = parseFloat(document.getElementById('addResHours').value) || 10;
+            const url = document.getElementById('addResUrl').value.trim();
+            if (!title) { showToast('请填写标题', 'error'); return; }
+            try {
+                const resp = await fetch(`${API}/resources/add`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title, domain, estimated_hours, url}) });
+                const d = await resp.json();
+                if (d.success) { hideAddResourceModal(); showToast('资源已添加', 'success'); loadResources(); }
+                else showToast(d.error, 'error');
+            } catch (e) { showToast('请求失败', 'error'); }
+        }
+
+        // ========== 本周计划 ==========
+        async function loadPlan() {
+            try {
+                const resp = await fetch(`${API}/plans`);
+                renderPlan(await resp.json());
+            } catch (e) { document.getElementById('planList').innerHTML = '<div class="empty-state">加载失败</div>'; }
+        }
+
+        function renderPlan(data) {
+            const { plans, week, week_end } = data;
+            document.getElementById('planTitle').textContent = `本周学习计划 (${week} ~ ${week_end})`;
+            if (!plans || plans.length === 0) { document.getElementById('planList').innerHTML = '<div class="empty-state">暂无计划，点「生成计划」或「新增」</div>'; return; }
+            const byDate = {};
+            plans.forEach(p => { if (!byDate[p.date]) byDate[p.date] = []; byDate[p.date].push(p); });
+            const dayNames = ['周日','周一','周二','周三','周四','周五','周六'];
+            let html = '';
+            Object.keys(byDate).sort().forEach(date => {
+                const d = new Date(date);
+                html += `<div class="plan-day"><div class="plan-date">${dayNames[d.getDay()]} ${d.getMonth()+1}月${d.getDate()}日</div>`;
+                byDate[date].forEach(p => {
+                    const dc = p.domain || 'work-ai';
+                    const dl = {work_ai:'工作',dsml:'DS/ML',quant:'Quant',philosophy:'哲学',literature:'文学',physics:'物理'}[dc] || dc;
+                    const done = p.status === 'completed';
+                    const hrs = done && p.actual_hours ? p.actual_hours : p.hours;
+                    const times = done && p.actual_start_time ? `${p.actual_start_time}-${p.actual_end_time}` : p.time_slot;
+                    html += `<div class="plan-task ${done?'completed':''}">
+                        <input type="checkbox" class="task-checkbox" ${done?'checked':''} onchange="togglePlan(${p.id},this,'${p.title}')">
+                        <span class="task-time">${times}</span>
+                        <span class="task-domain ${dc}">${dl}</span>
+                        <span class="task-title">${p.url?`<a href="${p.url}" target="_blank" style="color:inherit;text-decoration:none">${p.title}</a>`:p.title}</span>
+                        <span class="task-hours">${hrs}h</span>
+                        <div class="task-actions">
+                            <button class="btn btn-small btn-secondary" onclick="showEditPlanModal(${p.id},'${date}','${p.time_slot}','${p.title}','${p.domain}','${p.url||''}')">✏️</button>
+                            <button class="btn btn-small btn-danger" onclick="deletePlan(${p.id},'${p.title}')">✕</button>
+                        </div>
+                    </div>`;
+                });
+                html += '</div>';
+            });
+            document.getElementById('planList').innerHTML = html;
+        }
+
+        async function generatePlan() {
+            showToast('正在生成计划...', 'success');
+            try {
+                const resp = await fetch(`${API}/plans/generate`, { method:'POST' });
+                const d = await resp.json();
+                if (d.success) { showToast(`已生成 ${d.plans.length} 个计划`, 'success'); loadPlan(); }
+                else showToast(d.error, 'error');
+            } catch (e) { showToast('请求失败', 'error'); }
+        }
+
+        async function clearPlan() {
+            if (!confirm('确定清除本周所有计划？')) return;
+            try {
+                const resp = await fetch(`${API}/plans/clear`, { method:'POST' });
+                const d = await resp.json();
+                if (d.success) { showToast('已清除', 'success'); loadPlan(); }
+            } catch (e) { showToast('请求失败', 'error'); }
+        }
+
+        async function togglePlan(planId, checkbox, title) {
+            if (!checkbox.checked) return;
+            const actual_start = prompt(`${title}\n实际开始时间 (HH:MM)`, new Date().toTimeString().slice(0,5));
+            if (!actual_start) { checkbox.checked = false; return; }
+            const actual_end = prompt('实际结束时间 (HH:MM)', new Date().toTimeString().slice(0,5));
+            if (!actual_end) { checkbox.checked = false; return; }
+            try {
+                const resp = await fetch(`${API}/plans/complete`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({plan_id:planId, actual_start_time:actual_start, actual_end_time:actual_end}) });
+                const d = await resp.json();
+                if (d.success) { showToast(`用时 ${d.actual_hours}h`, 'success'); loadPlan(); loadResources(); }
+                else { showToast(d.error, 'error'); checkbox.checked = false; }
+            } catch (e) { showToast('请求失败', 'error'); checkbox.checked = false; }
+        }
+
+        async function deletePlan(planId, title) {
+            if (!confirm(`确定删除「${title}」？`)) return;
+            try {
+                const resp = await fetch(`${API}/plans/delete`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({plan_id:planId}) });
+                const d = await resp.json();
+                if (d.success) { showToast('已删除', 'success'); loadPlan(); }
+                else showToast(d.error, 'error');
+            } catch (e) { showToast('请求失败', 'error'); }
+        }
+
+        // ========== 修改/新增计划 ==========
+        let currentEditPlanId = null, isNewPlan = false;
+
+        function showEditPlanModal(planId, date, timeSlot, currentTitle, currentDomain, currentUrl) {
+            isNewPlan = false; currentEditPlanId = planId;
+            document.getElementById('editPlanModalTitle').textContent = '修改计划';
+            document.getElementById('editPlanDate').value = date;
+            document.getElementById('editPlanTimeSlot').value = timeSlot;
+            const sel = document.getElementById('editPlanResource');
+            sel.innerHTML = allResources.map(r => `<option value="${r.title}" data-domain="${r.domain}" data-url="${r.url||''}" ${r.title===currentTitle?'selected':''}>${r.title} [${r.domain}]</option>`).join('');
+            document.getElementById('editPlanModal').classList.add('active');
+        }
+
+        function showNewPlanModal() {
+            isNewPlan = true; currentEditPlanId = null;
+            document.getElementById('editPlanModalTitle').textContent = '新增计划';
+            document.getElementById('editPlanDate').value = new Date().toISOString().split('T')[0];
+            document.getElementById('editPlanTimeSlot').value = '09:00-12:00';
+            const sel = document.getElementById('editPlanResource');
+            sel.innerHTML = allResources.map(r => `<option value="${r.title}" data-domain="${r.domain}" data-url="${r.url||''}">${r.title} [${r.domain}]</option>`).join('');
+            document.getElementById('editPlanModal').classList.add('active');
+        }
+
+        function hideEditPlanModal() { document.getElementById('editPlanModal').classList.remove('active'); currentEditPlanId = null; isNewPlan = false; }
+
+        async function submitEditPlan() {
+            const sel = document.getElementById('editPlanResource');
+            const opt = sel.options[sel.selectedIndex];
+            const mt = sel.value, md = opt.dataset.domain, mu = opt.dataset.url;
+            const sd = document.getElementById('editPlanDate').value;
+            const ts = document.getElementById('editPlanTimeSlot').value.trim();
+            if (!mt || !sd || !ts) { showToast('请填写资源、日期和时间段', 'error'); return; }
+            if (isNewPlan) {
+                try {
+                    const resp = await fetch(`${API}/plans/add`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({material_title:mt, material_domain:md, material_url:mu, scheduled_date:sd, time_slot:ts}) });
+                    const d = await resp.json();
+                    if (d.success) { hideEditPlanModal(); showToast('已添加计划', 'success'); loadPlan(); }
+                    else showToast(d.error, 'error');
+                } catch (e) { showToast('请求失败', 'error'); }
+                return;
+            }
+            if (!currentEditPlanId) return;
+            try {
+                const resp = await fetch(`${API}/plans/modify`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({plan_id:currentEditPlanId, material_title:mt, material_domain:md, material_url:mu, scheduled_date:sd, time_slot:ts}) });
+                const d = await resp.json();
+                if (d.success) { hideEditPlanModal(); showToast('已保存', 'success'); loadPlan(); }
+                else showToast(d.error, 'error');
+            } catch (e) { showToast('请求失败', 'error'); }
+        }
+
+        // ========== 成果 ==========
+        const domainNames = {work_ai:'工作-AI开发',dsml:'兴趣-DS/ML',quant:'兴趣-Quant',philosophy:'阅读-哲学',literature:'阅读-文学',physics:'阅读-物理'};
+        async function loadAchievements() {
+            try {
+                const [ach, res] = await Promise.all([fetch(`${API}/achievements`), fetch(`${API}/resources`)]);
+                const achData = await ach.json(), resData = await res.json();
+                if (!achData.success) return;
+                const allMats = resData.resources||[];
+                // 同时更新 allResources（供 renderResources 使用）
+                allResources = allMats;
+                renderResources();
+                const done = allMats.filter(m => m.progress >= 100);
+                const prog = allMats.filter(m => m.progress > 0 && m.progress < 100 && !m.frozen);
+                const totalH = allMats.reduce((s,m) => s + (m.actual_hours||0), 0);
+                document.getElementById('achStats').innerHTML = `<div class="ach-stat"><div class="ach-stat-val">${done.length}</div><div class="ach-stat-lbl">已完成</div></div><div class="ach-stat"><div class="ach-stat-val">${prog.length}</div><div class="ach-stat-lbl">进行中</div></div><div class="ach-stat"><div class="ach-stat-val">${totalH.toFixed(1)}h</div><div class="ach-stat-lbl">总学时</div></div><div class="ach-stat"><div class="ach-stat-val">${allMats.length}</div><div class="ach-stat-lbl">资料总数</div></div>`;
+                const doms = {};
+                allMats.forEach(m => { const d = m.domain||'other'; doms[d] = (doms[d]||0) + 1; });
+                document.getElementById('achDomain').innerHTML = Object.entries(doms).map(([d,c]) => `<span class="domain-tag ${d}">${domainNames[d]||d} ${c}</span>`).join('');
+                document.getElementById('achCompletedCount').textContent = done.length;
+                document.getElementById('achCompletedList').innerHTML = done.length===0 ? '<li style="color:#888;font-size:13px;padding:10px">暂无</li>' : done.map(m => `<li class="ach-item"><span class="ach-title">${m.title}</span><span class="ach-meta">${domainNames[m.domain]||m.domain} · ${m.actual_hours}h</span></li>`).join('');
+                document.getElementById('achInProgressCount').textContent = prog.length;
+                document.getElementById('achInProgressList').innerHTML = prog.length===0 ? '<li style="color:#888;font-size:13px;padding:10px">暂无在学</li>' : prog.map(m => `<li style="padding:10px;border-bottom:1px solid #0f3460;display:flex;align-items:center;gap:14px"><svg width="44" height="44" viewBox="0 0 44 44" style="flex-shrink:0"><circle cx="22" cy="22" r="18" fill="none" stroke="#0f3460" stroke-width="4"/><circle cx="22" cy="22" r="18" fill="none" stroke="${m.progress>=100?'#27ae60':'#e67e22'}" stroke-width="4" stroke-linecap="round" stroke-dasharray="${Math.round(Math.PI*36*m.progress/100)} ${Math.round(Math.PI*36*(100-m.progress)/100)}" transform="rotate(-90 22 22)"/><text x="22" y="26" text-anchor="middle" font-size="10" fill="#eee" font-family="sans-serif">${m.progress}%</text></svg><div style="flex:1;min-width:0"><div style="font-size:14px;color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🎯 ${m.title}</div><div style="font-size:12px;color:#888;margin-top:2px">${domainNames[m.domain]||m.domain} · 已用 ${m.actual_hours}h</div></div><button class="btn btn-small btn-secondary" onclick="showProgressModal('${m.title.replace(/'/g,"\\'")}',${m.progress},${m.actual_hours},'${(m.domain||'').replace(/'/g,"\\'")}')">✏️</button></li>`).join('');
+                showToast('成果数据已更新');
+            } catch (e) { showToast('加载成果数据失败', 'error'); }
+        }
+
+        function showProgressModal(title, progress, actualHours, domain) {
+            const np = prompt(`更新「${title}」进度 (当前${progress}%)：`, progress);
+            if (np === null) return;
+            const p = parseInt(np);
+            if (isNaN(p)) return;
+            const nh = prompt('已用学时：', actualHours);
+            if (nh === null) return;
+            fetch(`${API}/resources/update`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title, progress:p, actual_hours:parseFloat(nh)||actualHours}) })
+                .then(r => r.json()).then(d => { if (d.success) { showToast('已更新','success'); loadResources(); loadAchievements(); } else showToast(d.error||'失败','error'); });
+        }
+
+        function showToast(msg, type='') { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + type; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
+
+        loadResources();
+    </script>
+</body>
+</html>
